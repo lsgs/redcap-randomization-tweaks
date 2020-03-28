@@ -1,0 +1,30 @@
+{
+	"name": "Randomization Tweaks",
+
+	"description": "Action tags @RANDNO and @RANDTIME.",
+
+	"namespace": "MCRI\\RandomizationTweaks",
+
+	"authors": [
+		{
+			"name": "Luke Stevens",
+			"email": "luke.stevens@mcri.edu.au",
+			"institution": "Murdoch Children's Research Institute"
+		}
+	],
+
+	"permissions": [
+                "redcap_save_record"
+	],
+
+        "enable-every-page-hooks-on-system-pages": false,
+
+	"system-settings": [
+            {
+                "key": "randno-project",
+                "name": "Project containing randomisation numbers that correspond to entries in the redcap_randomization_allocation table.",
+                "required": true,
+                "type": "project-id"
+            }
+	]
+}
