@@ -134,7 +134,7 @@ class RandomizationTweaks extends AbstractExternalModule
                             var fv = input.attr('fv');
                             var val = response.data[fld];
                             if (fv!=undefined) {
-                                var dateparts = val.slice(0, 9).split('-');
+                                var dateparts = val.slice(0, 10).split('-');
                                 var timepart = val.slice(10); // includes the space separator ' 03:04:05' 
                                 switch(fv.slice(-3)) {
                                   case 'dmy' : val = dateparts[2]+'-'+dateparts[1]+'-'+dateparts[0]+timepart; break; // 2000-11-22 03:04:05 -> 22-11-2000 03:04:05
