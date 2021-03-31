@@ -5,6 +5,8 @@
 
 	"namespace": "MCRI\\RandomizationTweaks",
 
+        "framework-version": 3,
+    
 	"authors": [
 		{
 			"name": "Luke Stevens",
@@ -14,6 +16,7 @@
 	],
 
 	"permissions": [
+                "redcap_every_page_before_render",
                 "redcap_save_record",
                 "redcap_data_entry_form"
 	],
@@ -26,6 +29,14 @@
                 "name": "Project containing randomisation numbers that correspond to entries in the redcap_randomization_allocation table.",
                 "required": true,
                 "type": "project-id"
+            }
+	],
+
+	"project-settings": [
+            {
+                "key": "logging",
+                "name": "Additional logging",
+                "type": "checkbox"
             }
 	]
 }

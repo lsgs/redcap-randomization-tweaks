@@ -11,28 +11,101 @@ use ExternalModules\AbstractExternalModule;
 class RandomizationTweaks extends AbstractExternalModule
 {
         protected $data_dictionary;
-        public function redcap_save_record($project_id, $record=null, $instrument, $event_id, $group_id=null, $survey_hash=null, $response_id=null, $repeat_instance=1) {
-
-                if (PAGE!=='Randomization/randomize_record.php') { return; }
-                
-                $randtimeField = $this->getTaggedField('@RANDTIME');
-                $randnoField = $this->getTaggedField('@RANDNO');
-                
-                if (!empty($randtimeField)) {
-                        $this->setRandTime($record, $event_id, $randtimeField);
-                }
-                if (!empty($randnoField)) {
-                        $this->setRandno($project_id, $record, $event_id, $randnoField);
+        protected $logging = false;
+        protected $record;
+        protected $event_id;
+        
+        public function __construct() {
+                parent::__construct();
+                if (defined('PROJECT_ID')) {
+                       $this->logging = (bool)$this->framework->getProjectSetting('logging');
                 }
         }
         
+        /**
+         * redcap_save_record
+         * - On randomisation look up randomisation number and set datetime in 
+         * tagged fields.
+         * - If a save of a data entry form with tagged fields, check allocation
+         * and if randomised then
+         */
+        public function redcap_save_record($project_id, $record=null, $instrument, $event_id, $group_id=null, $survey_hash=null, $response_id=null, $repeat_instance=1) {
+                $this->record = $record;
+                $this->event_id = $event_id;
+                $this->logmsg("redcap_save_record $project_id, $record, $instrument, $event_id: PAGE=".PAGE, 'Randomization Tweaks external module', false);
+                if (PAGE==='Randomization/randomize_record.php') { 
+
+                        $this->logmsg('Seeking tagged fields', 'Randomization Tweaks external module', false);
+
+                        $randtimeField = $this->getTaggedField('@RANDTIME');
+                        $randnoField = $this->getTaggedField('@RANDNO');
+
+                        if (!empty($randtimeField)) {
+                                $this->setRandTime($record, $event_id, $randtimeField);
+                        }
+                        if (!empty($randnoField)) {
+                                $this->setRandno($project_id, $record, $event_id, $randnoField);
+                        }
+                        
+                } else if (PAGE==='DataEntry/index.php') {
+                
+                        $randtimeField = $this->getTaggedField('@RANDTIME');
+                        $randnoField = $this->getTaggedField('@RANDNO');
+                        $target = $this->getTargetField($project_id);
+
+                        $randFields = array($target);
+                        if (!empty($randtimeField)) {
+                                $randFields[] = $randtimeField;
+                        }
+                        if (!empty($randnoField)) {
+                                $randFields[] = $randnoField;
+                        }
+
+                        $savedData = $this->getFieldData($record, $event_id, $randFields);
+                        
+                        if (!empty($savedData[$target]) && !empty($randtimeField) && empty($savedData[$randtimeField])) {
+                                $this->logmsg("Found randomised record with empty randomisation time field $randtimeField", 'Randomization Tweaks external module', false);
+                                $this->setRandTime($record, $event_id, $randtimeField);
+                        }
+                        if (!empty($savedData[$target]) && !empty($randnoField) && empty($savedData[$randnoField])) {
+                                $this->logmsg("Found randomised record with empty randomisation number field $randtimeField", 'Randomization Tweaks external module', false);
+                                $this->setRandno($project_id, $record, $event_id, $randnoField);
+                        }
+                }
+        }
+        
+        /**
+         * redcap_every_page_before_render
+         * If a save of the data entry form containing tagged fields, then do 
+         * not allow their values to be updated with blank 
+         * e.g. due to slow connection (saving form before read_saved_data_ajax
+         * call completes).
+         */
+        public function redcap_every_page_before_render($project_id=null) {
+                if (PAGE==='DataEntry/index.php' && isset($_POST['submit-action'])) {
+                        $taggedFields = array(
+                            '@RANDTIME' => $this->getTaggedField('@RANDTIME'),
+                            '@RANDNO' => $this->getTaggedField('@RANDNO')
+                        );
+                        
+                        foreach ($taggedFields as $tf) {
+                                if (isset($_POST[$tf]) && empty($_POST[$tf])) { 
+                                        $this->logmsg("Removing empty field '$tf' from save values", false);
+                                        unset($_POST[$tf]); 
+                                }
+                        }
+                }
+        }
+
         protected function getTaggedField($tag) {
                 $dd = $this->getDD();
                 foreach ($dd as $fieldName => $fieldAttr) {
                         if (preg_match("/$tag/", $fieldAttr['field_annotation'])) { 
+                                //$this->logmsg("Found field '$fieldName' tagged $tag", false);
                                 return $fieldName;
                         }
                 }
+                $this->logmsg("No field found with tag $tag", false);
                 return null;
         }
         
@@ -48,6 +121,7 @@ class RandomizationTweaks extends AbstractExternalModule
         }
         
         protected function setRandno($project_id, $record, $event_id, $field_name) {
+                $this->logmsg("Looking up randomisation number for record '$record'", false);
                 $aid = db_result(
                         db_query(
                             "select aid "
@@ -60,6 +134,7 @@ class RandomizationTweaks extends AbstractExternalModule
                                 . "where r.project_id=".db_escape($project_id)." and is_used_by='".db_escape($record)."'"
                         )
                     , 0);
+                $this->logmsg("Randomisation allocation id for record '$record' is $aid", false);
                 $randnoPid = $this->getSystemSetting('randno-project');
                 if (!empty($randnoPid) && !empty($aid)) {
                         $randnoData = \REDCap::getData(array(
@@ -70,18 +145,22 @@ class RandomizationTweaks extends AbstractExternalModule
                         ));
                         reset($randnoData[$aid]);
                         $eid = key($randnoData[$aid]);
-                        $this->save($record, $event_id, $field_name, $randnoData[$aid][$eid]['randno']);
+                        $randno = $randnoData[$aid][$eid]['randno'];
+                        $this->logmsg("Found randomisation number $randno", false);
+                        $this->save($record, $event_id, $field_name, $randno);
                 }
         }
         
         protected function save($record, $event_id, $field_name, $value) {
+                $recArray = array($record => array($event_id => array($field_name => $value)));
+                $this->logmsg("Saving $field_name => $value");
                 $saveResult = \REDCap::saveData(
                         'array', 
-                        array($record => array($event_id => array($field_name => $value)))
+                        $recArray
                 );
 
                 if (count($saveResult['errors'])>0) {
-                        \REDCap::logEvent("ERROR in Randomization Tweaks external module: could not save value to field","record=$record, event=$event_id, field=$field_name, value=$value <br>saveResult=".print_r($saveResult, true));
+                        $this->logmsg("ERROR! Could not save value to field: record=$record, event=$event_id, field=$field_name, value=$value <br>saveResult=".print_r($saveResult, true), true);
                         $this->sendAdminEmail("ERROR in Randomization Tweaks external module", "Could not save value to field: record=$record, event=$event_id, field=$field_name, value=$value <br>saveResult=".print_r($saveResult, true));
                 }
         }
@@ -93,6 +172,10 @@ class RandomizationTweaks extends AbstractExternalModule
                 // Need to get the field values via ajax and populate the inputs
                 if ($this->currentFormHasAllocationAndTaggedField($project_id, $instrument)) {
                         global $Proj;
+                        
+                        $this->record = $record;
+                        $this->event_id = $event_id;
+                
                         $randtimeField = $this->getTaggedField('@RANDTIME');
                         $randnoField = $this->getTaggedField('@RANDNO');
                         $ajaxUrl = $this->getUrl('read_saved_data_ajax.php');
@@ -162,14 +245,18 @@ class RandomizationTweaks extends AbstractExternalModule
         protected function currentFormHasAllocationAndTaggedField($project_id, $instrument) {
                 $randtimeField = $this->getTaggedField('@RANDTIME');
                 $randnoField = $this->getTaggedField('@RANDNO');
-                $target = db_result(db_query(
-                            "select target_field from redcap_randomization where project_id=".db_escape($project_id)
-                          ), 0);
+                $target = $this->getTargetField($project_id);
                 $dd = $this->getDD();
                 return $dd[$target]['form_name']==$instrument && (
                             $dd[$randtimeField]['form_name']==$instrument ||
                             $dd[$randnoField]['form_name']==$instrument 
                         );
+        }
+        
+        protected function getTargetField($project_id) {
+                return db_result(db_query(
+                            "select target_field from redcap_randomization where project_id=".db_escape($project_id)
+                          ), 0);
         }
         
         public function getFieldData(string $record, string $event_id, array $fields) {
@@ -183,5 +270,12 @@ class RandomizationTweaks extends AbstractExternalModule
                         $return[$f] = $recordData[$record][$event_id][$f];
                 }
                 return $return;
+        }
+        
+        protected function logmsg($msg, $always=false) {
+                if ($this->logging || $always) {
+                        $desc='Randomization Tweaks external module';
+                        \REDCap::logEvent($desc, $msg, '', $this->record, $this->event_id);
+                }
         }
 }
