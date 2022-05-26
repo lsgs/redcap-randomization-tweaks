@@ -30,6 +30,14 @@ class RandomizationTweaks extends AbstractExternalModule
          * and if randomised then
          */
         public function redcap_save_record($project_id, $record=null, $instrument, $event_id, $group_id=null, $survey_hash=null, $response_id=null, $repeat_instance=1) {
+
+                // delay in case randomisation occuring in current save via another EM e.g. Realtime Randomization
+                if ($this->delayModuleExecution()) { 
+                    // Boolean true is returned if the hook was successfully delayed, false if the hook cannot be delayed any longer and this is the module's last chance to perform any required actions. 
+                    // If delay successful, return; immediately to stop the current execution of hook
+                    return; 
+                }
+
                 $this->record = $record;
                 $this->event_id = $event_id;
                 $this->logmsg("redcap_save_record $project_id, $record, $instrument, $event_id: PAGE=".PAGE, 'Randomization Tweaks external module', false);
@@ -47,7 +55,7 @@ class RandomizationTweaks extends AbstractExternalModule
                                 $this->setRandno($project_id, $record, $event_id, $randnoField);
                         }
                         
-                } else if (PAGE==='DataEntry/index.php') {
+                } else if (PAGE==='DataEntry/index.php' || PAGE==='surveys/index.php') {
                 
                         $randtimeField = $this->getTaggedField('@RANDTIME');
                         $randnoField = $this->getTaggedField('@RANDNO');
@@ -122,20 +130,22 @@ class RandomizationTweaks extends AbstractExternalModule
         
         protected function setRandno($project_id, $record, $event_id, $field_name) {
                 $this->logmsg("Looking up randomisation number for record '$record'", false);
-                $aid = db_result(
-                        db_query(
-                            "select aid "
-                                . "from redcap_randomization_allocation ra "
-                                . "inner join redcap_randomization r "
-                                . " on r.rid=ra.rid "
-                                . "inner join redcap_projects p "
-                                . " on r.project_id=p.project_id "
-                                . " and ra.project_status=p.status "
-                                . "where r.project_id=".db_escape($project_id)." and is_used_by='".db_escape($record)."'"
-                        )
-                    , 0);
+                $sql = "select aid "
+                        . "from redcap_randomization_allocation ra "
+                        . "inner join redcap_randomization r "
+                        . " on r.rid=ra.rid "
+                        . "inner join redcap_projects p "
+                        . " on r.project_id=p.project_id "
+                        . " and ra.project_status=p.status "
+                        . "where r.project_id=? and is_used_by=?";
+                $q = $this->query($sql, [ $project_id, $record ]);
+                while ($row = $q->fetch_assoc()) {
+                        $aid = $row['aid'];
+                }
                 $this->logmsg("Randomisation allocation id for record '$record' is $aid", false);
-                $randnoPid = $this->getSystemSetting('randno-project');
+                $randnoPidS = $this->getSystemSetting('randno-project');
+                $randnoPidP = $this->getProjectSetting('randno-project-override');
+                $randnoPid = (empty($randnoPidP)) ? $randnoPidS : $randnoPidP;
                 if (!empty($randnoPid) && !empty($aid)) {
                         $randnoData = \REDCap::getData(array(
                                 'project_id' => $randnoPid,
@@ -143,11 +153,15 @@ class RandomizationTweaks extends AbstractExternalModule
                                 'records' => $aid,
                                 'fields' => 'randno'
                         ));
-                        reset($randnoData[$aid]);
-                        $eid = key($randnoData[$aid]);
-                        $randno = $randnoData[$aid][$eid]['randno'];
-                        $this->logmsg("Found randomisation number $randno", false);
-                        $this->save($record, $event_id, $field_name, $randno);
+                        if (count($randnoData)) {
+                                reset($randnoData[$aid]);
+                                $eid = key($randnoData[$aid]);
+                                $randno = $randnoData[$aid][$eid]['randno'];
+                                $this->logmsg("Found randomisation number $randno", false);
+                                $this->save($record, $event_id, $field_name, $randno);
+                        } else {
+                            $this->logmsg("***ERROR!*** Could not find randomisation number for aid=$aid in pid=$randnoPid", true);
+                        }
                 }
         }
         
