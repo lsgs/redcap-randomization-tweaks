@@ -40,18 +40,19 @@ class RandomizationTweaks extends AbstractExternalModule
 
                 $this->record = $record;
                 $this->event_id = $event_id;
-                $this->logmsg("redcap_save_record $project_id, $record, $instrument, $event_id: PAGE=".PAGE, 'Randomization Tweaks external module', false);
                 if (PAGE==='Randomization/randomize_record.php') { 
 
-                        $this->logmsg('Seeking tagged fields', 'Randomization Tweaks external module', false);
+                        $this->logmsg('Seeking tagged fields', false);
 
                         $randtimeField = $this->getTaggedField('@RANDTIME');
                         $randnoField = $this->getTaggedField('@RANDNO');
 
                         if (!empty($randtimeField)) {
+                                $this->logmsg("Found tagged randomisation time field $randtimeField", false);
                                 $this->setRandTime($record, $event_id, $randtimeField);
                         }
                         if (!empty($randnoField)) {
+                                $this->logmsg("Found tagged randomisation number field $randtimeField", false);
                                 $this->setRandno($project_id, $record, $event_id, $randnoField);
                         }
                         
@@ -72,11 +73,11 @@ class RandomizationTweaks extends AbstractExternalModule
                         $savedData = $this->getFieldData($record, $event_id, $randFields);
                         
                         if (!empty($savedData[$target]) && !empty($randtimeField) && empty($savedData[$randtimeField])) {
-                                $this->logmsg("Found randomised record with empty randomisation time field $randtimeField", 'Randomization Tweaks external module', false);
+                                $this->logmsg("Found randomised record with empty randomisation time field $randtimeField", true);
                                 $this->setRandTime($record, $event_id, $randtimeField);
                         }
                         if (!empty($savedData[$target]) && !empty($randnoField) && empty($savedData[$randnoField])) {
-                                $this->logmsg("Found randomised record with empty randomisation number field $randtimeField", 'Randomization Tweaks external module', false);
+                                $this->logmsg("Found randomised record with empty randomisation number field $randtimeField", true);
                                 $this->setRandno($project_id, $record, $event_id, $randnoField);
                         }
                 }
@@ -281,7 +282,7 @@ class RandomizationTweaks extends AbstractExternalModule
                 ));
                 $return = array();
                 foreach ($fields as $f) {
-                        $return[$f] = $recordData[$record][$event_id][$f];
+                        $return[$f] = htmlspecialchars($recordData[$record][$event_id][$f], ENT_QUOTES);
                 }
                 return $return;
         }
