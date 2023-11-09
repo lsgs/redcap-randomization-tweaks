@@ -280,7 +280,7 @@ class RandomizationTweaks extends AbstractExternalModule
                 ));
                 $return = array();
                 foreach ($fields as $f) {
-                        $return[$f] = htmlspecialchars($recordData[$record][$event_id][$f], ENT_QUOTES);
+                        $return[$f] = $this->escape($recordData[$record][$event_id][$f]);
                 }
                 return $return;
         }
