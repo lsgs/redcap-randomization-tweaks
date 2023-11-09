@@ -2,7 +2,7 @@
 	"name": "Randomization Tweaks",
 	"description": "Action tags @RANDNO and @RANDTIME.",
 	"namespace": "MCRI\\RandomizationTweaks",
-    "framework-version": 8,
+    "framework-version": 14,
 	"authors": [
 		{
 			"name": "Luke Stevens",
@@ -10,12 +10,17 @@
 			"institution": "Murdoch Children's Research Institute"
 		}
 	],
-	"permissions": [
-        "redcap_every_page_before_render",
-        "redcap_save_record",
-        "redcap_data_entry_form"
-	],
-    "enable-every-page-hooks-on-system-pages": false,
+    "auth-ajax-actions": [ "on-randomize" ],
+    "action-tags": [
+        {
+            "tag": "@RANDTIME",
+            "description": "Tag a date or datetime field to capture the date/time that the record was randomised."
+        },
+        {
+            "tag": "@RANDNO",
+            "description": "Tag a text field to capture the record's randomisation number (requries randomisation schedule to be downloaded from redcap_randomization_allocation and upload with corresponding randomisation numbers to the project specified in the module configuration)."
+        }
+    ],
 	"system-settings": [
         {
             "key": "randno-project",

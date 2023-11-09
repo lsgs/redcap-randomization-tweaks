@@ -10,17 +10,11 @@ use ExternalModules\AbstractExternalModule;
 
 class RandomizationTweaks extends AbstractExternalModule
 {
+        const AJAX_ACTION = 'on-randomize';
         protected $data_dictionary;
         protected $logging = false;
         protected $record;
         protected $event_id;
-        
-        public function __construct() {
-                parent::__construct();
-                if (defined('PROJECT_ID')) {
-                       $this->logging = (bool)$this->framework->getProjectSetting('logging');
-                }
-        }
         
         /**
          * redcap_save_record
@@ -30,7 +24,7 @@ class RandomizationTweaks extends AbstractExternalModule
          * and if randomised then
          */
         public function redcap_save_record($project_id, $record=null, $instrument, $event_id, $group_id=null, $survey_hash=null, $response_id=null, $repeat_instance=1) {
-
+                $this->logging = (bool)$this->getProjectSetting('logging');
                 // delay in case randomisation occuring in current save via another EM e.g. Realtime Randomization
                 if ($this->delayModuleExecution()) { 
                     // Boolean true is returned if the hook was successfully delayed, false if the hook cannot be delayed any longer and this is the module's last chance to perform any required actions. 
@@ -91,7 +85,8 @@ class RandomizationTweaks extends AbstractExternalModule
          * call completes).
          */
         public function redcap_every_page_before_render($project_id=null) {
-                if (PAGE==='DataEntry/index.php' && isset($_POST['submit-action'])) {
+                if (!is_null($project_id) && PAGE==='DataEntry/index.php' && isset($_POST['submit-action'])) {
+                        $this->logging = (bool)$this->getProjectSetting('logging');
                         $taggedFields = array(
                             '@RANDTIME' => $this->getTaggedField('@RANDTIME'),
                             '@RANDNO' => $this->getTaggedField('@RANDNO')
@@ -193,64 +188,67 @@ class RandomizationTweaks extends AbstractExternalModule
                 
                         $randtimeField = $this->getTaggedField('@RANDTIME');
                         $randnoField = $this->getTaggedField('@RANDNO');
+
+                        $this->initializeJavascriptModuleObject();
                         $ajaxUrl = $this->getUrl('read_saved_data_ajax.php');
                         ?>
 <script type="text/javascript">
     $(document).ready(function(){
-        if ($('#redcapRandomizeBtn').length) { // not already randomised (button is displayed)
-            var ajaxUrl = '<?php echo $ajaxUrl;?>';
-            var record = '<?php echo $record;?>';
-            var event_id = '<?php echo $event_id;?>';
-            var randtimeField = '<?php echo (is_null($randtimeField))?null:$randtimeField;?>';
-            var randnoField = '<?php echo (is_null($randnoField))?null:$randnoField;?>';
+        if ($('#redcapRandomizeBtn').length==0) { return; } // "Randomize" button not present? Do nothing
 
-            if (record==='') { // record created by randomisation
-                record = $('tr[sq_id=<?php echo $Proj->table_pk;?>] > td:nth-child(2)')[0].innerText;
+        var module = <?=$this->getJavascriptModuleObjectName()?>;
+
+        module.record = '<?php echo $record;?>';
+        if (module.record==='') { // record created by randomisation
+            module.record = $('tr[sq_id=<?php echo $Proj->table_pk;?>] > td:nth-child(2)')[0].innerText;
+        }
+        module.randtimeField = '<?php echo (is_null($randtimeField))?null:$randtimeField;?>';
+        module.randnoField = '<?php echo (is_null($randnoField))?null:$randnoField;?>';
+            
+        // if a jQuery UI Dialog has never been opened before on a page, then the overlay div won't exist in the DOM. Hence, you may consider doing something like this instead: https://stackoverflow.com/questions/171928/jquery-ui-dialog-how-to-hook-into-dialog-close-event
+        $('body').on('dialogclose', '.ui-dialog', function(event) {
+            if (event.target.id=='randomizeDialog' && $('#redcapRandomizeBtn').length==0) {
+                module.populateModuleFields();
             }
-            
-            // if a jQuery UI Dialog has never been opened before on a page, then the overlay div won't exist in the DOM. Hence, you may consider doing something like this instead: https://stackoverflow.com/questions/171928/jquery-ui-dialog-how-to-hook-into-dialog-close-event
-            $('body').on('dialogclose', '.ui-dialog', function(event) {
-                if (event.target.id=='randomizeDialog' && $('#redcapRandomizeBtn').length==0) {
-                    populateModuleFields();
+        });
+
+        module.findInput = function(fld) {
+            return $('input[name='+fld+']');
+        };
+
+        module.processAjaxResponse = function(responseData) {
+            Object.keys(responseData).forEach(function(fld) {
+                var input = module.findInput(fld);
+                var fv = input.attr('fv');
+                var val = responseData[fld];
+                if (fv!=undefined) {
+                    var dateparts = val.slice(0, 10).split('-');
+                    var timepart = val.slice(10); // includes the space separator ' 03:04:05' 
+                    switch(fv.slice(-3)) {
+                        case 'dmy' : val = dateparts[2]+'-'+dateparts[1]+'-'+dateparts[0]+timepart; break; // 2000-11-22 03:04:05 -> 22-11-2000 03:04:05
+                        case 'mdy': val = dateparts[1]+'-'+dateparts[2]+'-'+dateparts[0]+timepart; break; // 2000-11-22 03:04:05 -> 11-22-2000 03:04:05
+                        default: break;
+                    }
                 }
+                input.val(val).trigger('blur');
             });
-            
-            function populateModuleFields() {
-                var getdata = {};
-                var fields = [];
-                getdata.record = record;
-                getdata.event_id = event_id;
-                if (randtimeField!=='' && findInput(randtimeField).length) fields.push(randtimeField);
-                if (randnoField!=='' && findInput(randtimeField).length) fields.push(randnoField);
-                getdata.fields = fields;
-                $.ajax({
-                    url: ajaxUrl,
-                    data: getdata,
-                    success: function(response) {
-                        Object.keys(response.data).forEach(function(fld) {
-                            var input = findInput(fld);
-                            var fv = input.attr('fv');
-                            var val = response.data[fld];
-                            if (fv!=undefined) {
-                                var dateparts = val.slice(0, 10).split('-');
-                                var timepart = val.slice(10); // includes the space separator ' 03:04:05' 
-                                switch(fv.slice(-3)) {
-                                  case 'dmy' : val = dateparts[2]+'-'+dateparts[1]+'-'+dateparts[0]+timepart; break; // 2000-11-22 03:04:05 -> 22-11-2000 03:04:05
-                                  case 'mdy': val = dateparts[1]+'-'+dateparts[2]+'-'+dateparts[0]+timepart; break; // 2000-11-22 03:04:05 -> 11-22-2000 03:04:05
-                                  default: break;
-                                }
-                            }
-                            input.val(val).trigger('blur');
-                        });
-                    },
-                    dataType: 'json'
+        };
+
+        module.populateModuleFields = function() {
+            var getdata = {};
+            getdata.recordid = module.record;
+            var fields = [];
+            if (module.randtimeField!=='' && module.findInput(module.randtimeField).length) fields.push(module.randtimeField);
+            if (module.randnoField!=='' && module.findInput(module.randtimeField).length) fields.push(module.randnoField);
+            getdata.fields = fields;
+            if (getdata.fields.length) {
+                module.ajax('<?=static::AJAX_ACTION?>', getdata).then(function(response) {
+                    module.processAjaxResponse(response);
+                }).catch(function(err) {
+                    console.log('failed to obtain randomisation number or time: '+err);
                 });
             }
-            
-            function findInput(fld) {
-                return $('input[name='+fld+']');
-            }
-        }
+        };
     });
 </script>
                         <?php
@@ -292,5 +290,12 @@ class RandomizationTweaks extends AbstractExternalModule
                         $desc='Randomization Tweaks external module';
                         \REDCap::logEvent($desc, $msg, '', $this->record, $this->event_id);
                 }
+        }
+
+        public function redcap_module_ajax($action, $payload, $project_id, $record, $instrument, $event_id, $repeat_instance, $survey_hash, $response_id, $survey_queue_hash, $page, $page_full, $user_id, $group_id) {
+                if (!array_key_exists('recordid', $payload) || !array_key_exists('fields', $payload)) {
+                        throw new \Exception("no recordid or fields");                        
+                }
+                return $this->getFieldData($payload['recordid'], $event_id, $payload['fields']);
         }
 }
